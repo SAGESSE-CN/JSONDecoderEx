@@ -193,11 +193,11 @@ open class JSONDecoderEx {
         let decoder: _CustomJSONValueDecoderImpl
         do {
             let object = try JSONSerialization.jsonObject(with: data, options: readingOptions)
-            decoder = _CustomJSONValueDecoderImpl(userInfo: userInfo, from: .init(object), codingPath: [], options: options)
+            decoder = _CustomJSONValueDecoderImpl(self, from: object)
         } catch {
             throw DecodingError.dataCorrupted(.init(codingPath: [], debugDescription: "The given data was not valid JSON.", underlyingError: error))
         }
-        return try decoder.decode(T.self)
+        return try decoder.decode(type)
     }
     
     /// Decodes a top-level value of the given type from the given JSON representation.
@@ -211,8 +211,8 @@ open class JSONDecoderEx {
         guard JSONSerialization.isValidJSONObject([object]) else {
             throw DecodingError.dataCorrupted(.init(codingPath: [], debugDescription: "The given data was not valid JSON.", underlyingError: nil))
         }
-        let decoder = _CustomJSONValueDecoderImpl(userInfo: userInfo, from: .init(object), codingPath: [], options: options)
-        return try decoder.decode(T.self)
+        let decoder = _CustomJSONValueDecoderImpl(self, from: object)
+        return try decoder.decode(type)
     }
 }
 
@@ -225,13 +225,13 @@ fileprivate enum _CustomJSONValue {
     /// An blank value, a.k.a data fill mode.
     case blank
     
-    ///
     case null
     case number(NSNumber)
     case string(String)
     case array([Any])
     case dictionary([String: Any])
     
+    /// Create a JSON value from any object.
     init(_ value: Any) {
         switch value {
         case let value as String: self = .string(value)
@@ -300,7 +300,7 @@ fileprivate enum _CustomJSONValue {
             return nil
             
         case .blank:
-            // An blank value, the self and element value is samed
+            // An blank value, the self and element value is samed.
             return self
             
         default:
@@ -318,7 +318,7 @@ fileprivate enum _CustomJSONValue {
             return nil
             
         case .blank:
-            // An blank value, the self and element value is samed
+            // An blank value, the self and element value is samed.
             return self
             
         default:
@@ -339,6 +339,16 @@ fileprivate struct _CustomJSONValueDecoderImpl: Decoder {
     let value: _CustomJSONValue
     let options: JSONDecoderEx.Options
     
+    init(_ decoder: JSONDecoderEx, from value: Any) {
+        self.userInfo = decoder.userInfo
+        self.codingPath = []
+        self.options = decoder.options
+        var value = _CustomJSONValue(value)
+        if case .null = value, case .automatically = options.nonOptionalDecodingStrategy {
+            value = .blank
+        }
+        self.value = value
+    }
     init(userInfo: [CodingUserInfoKey: Any], from value: _CustomJSONValue, codingPath: [CodingKey], options: JSONDecoderEx.Options) {
         self.userInfo = userInfo
         self.codingPath = codingPath
@@ -439,8 +449,8 @@ fileprivate extension _CustomJSONValueDecoderImpl {
             // An number value, convert number to string.
             return value.stringValue
             
-        case .blank:
-            // An blank value, convert always return empty string.
+        case .blank, .null:
+            // An null or blank value, always return empty.
             return ""
             
         default:
@@ -470,9 +480,13 @@ fileprivate extension _CustomJSONValueDecoderImpl {
                     return NSNumber(value: Double.nan)
                 }
             }
-            // Convert the "0/0.0" to number.
-            if let value = Decimal(string: value) {
+            // Provide a special version of the paraser for decimal.
+            if let type = type as? Decimal.Type, let value = type.init(string: value) {
                 return NSDecimalNumber(decimal: value)
+            }
+            // Convert the "±0/±0.0" to NSNumber.
+            if let value = _numberFormatter.number(from: value) {
+                return value
             }
             // Convert the "true/false" to number.
             if let value = Bool(value) {
@@ -482,8 +496,8 @@ fileprivate extension _CustomJSONValueDecoderImpl {
                 codingPath: codingPath,
                 debugDescription: "Parsed JSON number <\(value)> does not fit in \(type)."))
             
-        case .blank:
-            // An blank value, convert always return zero number.
+        case .blank, .null:
+            // An null or blank value, always return zero.
             return 0
             
         default:
@@ -1021,5 +1035,10 @@ fileprivate struct _CustomJSONValueDecoderUnkeyedContainer: UnkeyedDecodingConta
 fileprivate var _iso8601Formatter: ISO8601DateFormatter = {
     let formatter = ISO8601DateFormatter()
     formatter.formatOptions = .withInternetDateTime
+    return formatter
+}()
+
+fileprivate var _numberFormatter: NumberFormatter = {
+    let formatter = NumberFormatter()
     return formatter
 }()
