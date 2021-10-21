@@ -360,17 +360,17 @@ fileprivate struct _CustomJSONValueDecoderImpl: Decoder {
     }
     
     @usableFromInline func container<Key>(keyedBy key: Key.Type) throws -> KeyedDecodingContainer<Key> where Key: CodingKey {
-        guard let value = dictionaryValue() else {
+        guard let rawValue = dictionaryValue() else {
             throw createTypeMismatch([String: Any].self, from: value)
         }
-        return KeyedDecodingContainer(_CustomJSONValueDecoderKeyedContainer<Key>(impl: self, from: value, codingPath: codingPath))
+        return KeyedDecodingContainer(_CustomJSONValueDecoderKeyedContainer<Key>(impl: self, from: rawValue, codingPath: codingPath))
     }
     
     @usableFromInline func unkeyedContainer() throws -> UnkeyedDecodingContainer {
-        guard let value = arrayValue() else {
+        guard let rawValue = arrayValue() else {
             throw createTypeMismatch([Any].self, from: value)
         }
-        return _CustomJSONValueDecoderUnkeyedContainer(impl: self, from: value, codingPath: codingPath)
+        return _CustomJSONValueDecoderUnkeyedContainer(impl: self, from: rawValue, codingPath: codingPath)
     }
     
     @usableFromInline func singleValueContainer() throws -> SingleValueDecodingContainer {
@@ -859,32 +859,32 @@ fileprivate struct _CustomJSONValueDecoderKeyedContainer<Key: CodingKey>: KeyedD
     
     
     @inline(__always) private func value<T>(_ type: T.Type, forKey key: CodingKey) throws -> _CustomJSONValue {
-        guard let value = value.value(forKey: key.stringValue) else {
+        guard let rawValue = value.value(forKey: key.stringValue) else {
             if case .automatically = impl.options.nonOptionalDecodingStrategy {
                 return .blank
             }
             throw impl.careteKeyNotFound(key)
         }
-        return value
+        return rawValue
     }
     @inline(__always) private func decodeNumber<T>(_ type: T.Type, forKey key: Key) throws -> NSNumber {
-        let value = try value(type, forKey: key)
-        guard let numberValue = try impl.numberValue(type, from: value, forKey: key) else {
-            throw impl.createTypeMismatch(type, from: value, forKey: key)
+        let rawValue = try value(type, forKey: key)
+        guard let numberValue = try impl.numberValue(type, from: rawValue, forKey: key) else {
+            throw impl.createTypeMismatch(type, from: rawValue, forKey: key)
         }
         return numberValue
     }
     @inline(__always) private func decodeString(_ type: String.Type, forKey key: Key) throws -> String {
-        let value = try value(type, forKey: key)
-        guard let stringValue = try impl.stringValue(type, from: value, forKey: key) else {
-            throw impl.createTypeMismatch(type, from: value, forKey: key)
+        let rawValue = try value(type, forKey: key)
+        guard let stringValue = try impl.stringValue(type, from: rawValue, forKey: key) else {
+            throw impl.createTypeMismatch(type, from: rawValue, forKey: key)
         }
         return stringValue
     }
     
     @inline(__always) private func decoder(forKey key: CodingKey) throws -> _CustomJSONValueDecoderImpl {
-        let json = try value(Decoder.self, forKey: key)
-        return impl.nestedDecoder(json, forKey: key)
+        let rawValue = try value(Decoder.self, forKey: key)
+        return impl.nestedDecoder(rawValue, forKey: key)
     }
 }
 
@@ -957,7 +957,7 @@ fileprivate struct _CustomJSONValueDecoderUnkeyedContainer: UnkeyedDecodingConta
     }
     
     mutating func decode<T>(_ type: T.Type) throws -> T where T: Decodable {
-        let decoder = try decoder(as: T.self)
+        let decoder = try nestedDecoder(as: T.self)
         let result = try decoder.decode(T.self)
         
         // Because of the requirement that the index not be incremented unless
@@ -969,21 +969,21 @@ fileprivate struct _CustomJSONValueDecoderUnkeyedContainer: UnkeyedDecodingConta
     }
     
     mutating func nestedContainer<NestedKey>(keyedBy type: NestedKey.Type) throws -> KeyedDecodingContainer<NestedKey> where NestedKey: CodingKey {
-        let decoder = try decoder(as: KeyedDecodingContainer<NestedKey>.self)
+        let decoder = try nestedDecoder(as: KeyedDecodingContainer<NestedKey>.self)
         let container = try decoder.container(keyedBy: type)
         self.currentIndex += 1
         return container
     }
     
     mutating func nestedUnkeyedContainer() throws -> UnkeyedDecodingContainer {
-        let decoder = try decoder(as: UnkeyedDecodingContainer.self)
+        let decoder = try nestedDecoder(as: UnkeyedDecodingContainer.self)
         let container = try decoder.unkeyedContainer()
         self.currentIndex += 1
         return container
     }
     
     mutating func superDecoder() throws -> Decoder {
-        let decoder = try decoder(as: Decoder.self)
+        let decoder = try nestedDecoder(as: Decoder.self)
         self.currentIndex += 1
         return decoder
     }
@@ -994,7 +994,7 @@ fileprivate struct _CustomJSONValueDecoderUnkeyedContainer: UnkeyedDecodingConta
     }
     
     @inline(__always) private mutating func nextValue<T>(_ type: T.Type) throws -> _CustomJSONValue {
-        guard let value = value.value(forKey: currentIndex) else {
+        guard let rawValue = value.value(forKey: currentIndex) else {
             if case .automatically = impl.options.nonOptionalDecodingStrategy {
                 return .blank
             }
@@ -1007,7 +1007,7 @@ fileprivate struct _CustomJSONValueDecoderUnkeyedContainer: UnkeyedDecodingConta
             }
             throw impl.createValueNotFound(type, forKey: currentIndexKey, debugDescription: message)
         }
-        return value
+        return rawValue
     }
     @inline(__always) private mutating func decodeNumber<T>(_ type: T.Type) throws -> NSNumber {
         let value = try nextValue(type)
@@ -1026,7 +1026,7 @@ fileprivate struct _CustomJSONValueDecoderUnkeyedContainer: UnkeyedDecodingConta
         return stringValue
     }
     
-    @inline(__always) private mutating func decoder<T>(as type: T) throws -> _CustomJSONValueDecoderImpl {
+    @inline(__always) private mutating func nestedDecoder<T>(as type: T) throws -> _CustomJSONValueDecoderImpl {
         let value = try nextValue(T.self)
         return impl.nestedDecoder(value, forKey: currentIndexKey)
     }
