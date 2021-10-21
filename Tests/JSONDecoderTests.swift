@@ -246,6 +246,22 @@ class JSONDecoderTests: XCTestCase {
         XCTAssertEqual(try def.decode(E<I>.self, from: [:]).w.w, 233)
     }
     
+    func testCustomNumber() {
+        let def = JSONDecoderEx()
+        def.nonConformingNumberDecodingStrategy = .custom {
+            let value = try String(from: $0)
+            if value == "null" {
+                return NSNumber(value: 233)
+            }
+            throw DecodingError.dataCorrupted(.init(codingPath: $0.codingPath, debugDescription: ""))
+        }
+        XCTAssertEqual(try def.decode(Int.self, from: "null"), 233)
+        def.nonConformingNumberDecodingStrategy = .convertFromString(positiveInfinity: "inf", negativeInfinity: "-inf", nan: "nan")
+        XCTAssertEqual(try def.decode(Double.self, from: "inf"), .infinity)
+        XCTAssertEqual(try def.decode(Double.self, from: "-inf"), -.infinity)
+        XCTAssertEqual(try def.decode(Double.self, from: "nan").description, "nan")
+    }
+    
     func testDemo() {
         let j = """
                 {

@@ -53,13 +53,16 @@ open class JSONDecoderEx {
         case custom((_ decoder: Decoder) throws -> Data)
     }
     
-    /// The strategy to use for non-JSON-conforming floating-point values (IEEE 754 infinity and NaN).
-    public enum NonConformingFloatDecodingStrategy {
+    /// The strategy to use for non-JSON-conforming number values (IEEE 754 infinity and NaN).
+    public enum NonConformingNumberDecodingStrategy {
         /// Throw upon encountering non-conforming values. This is the default strategy.
         case `throw`
         
         /// Decode the values from the given representation strings.
         case convertFromString(positiveInfinity: String, negativeInfinity: String, nan: String)
+        
+        /// Decode the values from the given representation strings.
+        case custom((_ decoder: Decoder) throws -> NSNumber)
     }
     
     /// The strategy to use in decoding non-optional type for not found key or value. Defaults to `.automatically`.
@@ -126,7 +129,7 @@ open class JSONDecoderEx {
     open var dataDecodingStrategy: DataDecodingStrategy = .base64
     
     /// The strategy to use in decoding non-conforming numbers. Defaults to `.throw`.
-    open var nonConformingFloatDecodingStrategy: NonConformingFloatDecodingStrategy = .throw
+    open var nonConformingNumberDecodingStrategy: NonConformingNumberDecodingStrategy = .throw
     
     /// The strategy to use in decoding non-optional type for not found key or value. Defaults to `.automatically`.
     open var nonOptionalDecodingStrategy: NonOptionalDecodingStrategy = .automatically
@@ -147,7 +150,7 @@ open class JSONDecoderEx {
     fileprivate struct Options {
         let dateDecodingStrategy: DateDecodingStrategy
         let dataDecodingStrategy: DataDecodingStrategy
-        let nonConformingFloatDecodingStrategy: NonConformingFloatDecodingStrategy
+        let nonConformingNumberDecodingStrategy: NonConformingNumberDecodingStrategy
         let nonOptionalDecodingStrategy: NonOptionalDecodingStrategy
         let keyDecodingStrategy: KeyDecodingStrategy
         let userInfo: [CodingUserInfoKey: Any]
@@ -157,7 +160,7 @@ open class JSONDecoderEx {
     fileprivate var options: Options {
         return Options(dateDecodingStrategy: dateDecodingStrategy,
                        dataDecodingStrategy: dataDecodingStrategy,
-                       nonConformingFloatDecodingStrategy: nonConformingFloatDecodingStrategy,
+                       nonConformingNumberDecodingStrategy: nonConformingNumberDecodingStrategy,
                        nonOptionalDecodingStrategy: nonOptionalDecodingStrategy,
                        keyDecodingStrategy: keyDecodingStrategy,
                        userInfo: userInfo)
@@ -376,7 +379,7 @@ fileprivate struct _CustomJSONValueDecoderImpl: Decoder {
     
     
     @inline(__always) func nestedDecoder(_ value: _CustomJSONValue, forKey key: CodingKey) -> _CustomJSONValueDecoderImpl {
-        return _CustomJSONValueDecoderImpl(userInfo: userInfo, from: value, codingPath: codingPath + [key], options: options)
+        return _CustomJSONValueDecoderImpl(userInfo: userInfo, from: value, codingPath: codingPath + key, options: options)
     }
 }
 
@@ -405,7 +408,7 @@ fileprivate extension _CustomJSONValueDecoderImpl {
                 converted.reserveCapacity(value.count)
                 value.forEach { key, value in
                     let key = JSONDecoderEx.JSONKey(stringValue: key)
-                    converted[converter(codingPath + [key]).stringValue] = value
+                    converted[converter(codingPath + key).stringValue] = value
                 }
                 return .dictionary(converted)
                 
@@ -439,7 +442,7 @@ fileprivate extension _CustomJSONValueDecoderImpl {
         }
     }
     /// Convert the specified value to string value.
-    func stringValue<T>(_ typp: T.Type, from value: _CustomJSONValue) throws -> String? {
+    func stringValue<T>(_ typp: T.Type, from value: _CustomJSONValue, forKey key: CodingKey? = nil) throws -> String? {
         switch value {
         case .string(let value):
             // An string value already.
@@ -458,18 +461,19 @@ fileprivate extension _CustomJSONValueDecoderImpl {
         }
     }
     /// Convert the specified value to number value.
-    func numberValue<T>(_ type: T.Type, from value: _CustomJSONValue) throws -> NSNumber? {
+    func numberValue<T>(_ type: T.Type, from value: _CustomJSONValue, forKey key: CodingKey? = nil) throws -> NSNumber? {
         switch value {
         case .number(let value):
             // An number value already, maybe needs more fixed width type validation.
             guard compatible(value, to: type) else {
-                throw DecodingError.dataCorrupted(.init(codingPath: codingPath, debugDescription: "Parsed JSON number <\(value)> does not fit in \(type)."))
+                throw DecodingError.dataCorrupted(.init(codingPath: codingPath + key, debugDescription: "Parsed JSON number <\(value)> does not fit in \(type)."))
             }
             return value
             
         case .string(let value):
-            // An string value, try convert to number.
-            if case .convertFromString(let posInf, let negInf, let nan) = options.nonConformingFloatDecodingStrategy {
+            // An string value
+            // Try convert to inf/-inf/nan number.
+            if case .convertFromString(let posInf, let negInf, let nan) = options.nonConformingNumberDecodingStrategy {
                 if value == posInf {
                     return NSNumber(value: +Double.infinity)
                 }
@@ -492,8 +496,13 @@ fileprivate extension _CustomJSONValueDecoderImpl {
             if let value = Bool(value) {
                 return NSNumber(value: value)
             }
+            // Try conver to custom number.
+            if case .custom(let converter) = options.nonConformingNumberDecodingStrategy {
+                let decoder = _CustomJSONValueDecoderImpl(userInfo: userInfo, from: .string(value), codingPath: codingPath + key, options: options)
+                return try converter(decoder)
+            }
             throw DecodingError.dataCorrupted(.init(
-                codingPath: codingPath,
+                codingPath: codingPath + key,
                 debugDescription: "Parsed JSON number <\(value)> does not fit in \(type)."))
             
         case .blank, .null:
@@ -558,20 +567,16 @@ fileprivate extension _CustomJSONValueDecoderImpl {
     
     @inline(__always) func createTypeMismatch<T>(_ type: T.Type, from value: _CustomJSONValue, forKey key: CodingKey? = nil) -> DecodingError {
         let description = "Expected to decode \(type) but found \(value.description) instead."
-        var path = codingPath
-        if let key = key {
-            path.append(key)
-        }
-        return .typeMismatch(type, .init(codingPath: path, debugDescription: description))
+        return .typeMismatch(type, .init(codingPath: codingPath + key, debugDescription: description))
     }
     
     @inline(__always) func careteKeyNotFound(_ key: CodingKey, debugDescription: String? = nil) -> DecodingError {
         let description = debugDescription ?? "No value associated with key \(key)."
-        return DecodingError.keyNotFound(key, .init(codingPath: codingPath + [key], debugDescription: description))
+        return DecodingError.keyNotFound(key, .init(codingPath: codingPath + key, debugDescription: description))
     }
     
     @inline(__always) func createValueNotFound<T>(_ type: T.Type, forKey key: CodingKey, debugDescription: String) -> DecodingError {
-        return DecodingError.valueNotFound(type, .init(codingPath: codingPath + [key], debugDescription: debugDescription))
+        return DecodingError.valueNotFound(type, .init(codingPath: codingPath + key, debugDescription: debugDescription))
     }
 }
 
@@ -864,14 +869,14 @@ fileprivate struct _CustomJSONValueDecoderKeyedContainer<Key: CodingKey>: KeyedD
     }
     @inline(__always) private func decodeNumber<T>(_ type: T.Type, forKey key: Key) throws -> NSNumber {
         let value = try value(type, forKey: key)
-        guard let numberValue = try impl.numberValue(type, from: value) else {
+        guard let numberValue = try impl.numberValue(type, from: value, forKey: key) else {
             throw impl.createTypeMismatch(type, from: value, forKey: key)
         }
         return numberValue
     }
     @inline(__always) private func decodeString(_ type: String.Type, forKey key: Key) throws -> String {
         let value = try value(type, forKey: key)
-        guard let stringValue = try impl.stringValue(type, from: value) else {
+        guard let stringValue = try impl.stringValue(type, from: value, forKey: key) else {
             throw impl.createTypeMismatch(type, from: value, forKey: key)
         }
         return stringValue
@@ -1006,7 +1011,7 @@ fileprivate struct _CustomJSONValueDecoderUnkeyedContainer: UnkeyedDecodingConta
     }
     @inline(__always) private mutating func decodeNumber<T>(_ type: T.Type) throws -> NSNumber {
         let value = try nextValue(type)
-        guard let numberValue = try impl.numberValue(type, from: value) else {
+        guard let numberValue = try impl.numberValue(type, from: value, forKey: currentIndexKey) else {
             throw impl.createTypeMismatch(type, from: value, forKey: currentIndexKey)
         }
         self.currentIndex += 1
@@ -1014,7 +1019,7 @@ fileprivate struct _CustomJSONValueDecoderUnkeyedContainer: UnkeyedDecodingConta
     }
     @inline(__always) private mutating func decodeString<T>(_ type: T.Type) throws -> String {
         let value = try nextValue(type)
-        guard let stringValue = try impl.stringValue(type, from: value) else {
+        guard let stringValue = try impl.stringValue(type, from: value, forKey: currentIndexKey) else {
             throw impl.createTypeMismatch(type, from: value, forKey: currentIndexKey)
         }
         self.currentIndex += 1
@@ -1031,6 +1036,17 @@ fileprivate struct _CustomJSONValueDecoderUnkeyedContainer: UnkeyedDecodingConta
 // MARK: -
 
 
+fileprivate extension Array {
+    static func +(lhs: [Element], rhs: Element?) -> [Element] where Element == CodingKey {
+        guard let rhs = rhs else {
+            return lhs
+        }
+        var results = lhs
+        results.append(rhs)
+        return results
+    }
+}
+
 @available(macOS 10.12, iOS 10.0, watchOS 3.0, tvOS 10.0, *)
 fileprivate var _iso8601Formatter: ISO8601DateFormatter = {
     let formatter = ISO8601DateFormatter()
@@ -1042,3 +1058,4 @@ fileprivate var _numberFormatter: NumberFormatter = {
     let formatter = NumberFormatter()
     return formatter
 }()
+
