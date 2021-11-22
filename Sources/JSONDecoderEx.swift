@@ -10,11 +10,6 @@
 
 import Foundation
 
-/// If a type conform the JSONDecoderExByNilLiteral protocol, will automatically call ``init()`` when key/value not found.
-public protocol JSONDecoderExByNilLiteral {
-    init()
-}
-
 
 /// `JSONDecoderEx` facilitates the decoding of JSON into semantic `Decodable` types.
 open class JSONDecoderEx {
@@ -216,6 +211,28 @@ open class JSONDecoderEx {
         }
         let decoder = _CustomJSONValueDecoderImpl(self, from: object)
         return try decoder.decode(type)
+    }
+}
+
+
+// MARK: -
+
+
+/// If a type conform the Unknownable protocol, will automatically call when key/value not found.
+public protocol Unknownable {
+    static var unknown: Self { get }
+}
+
+extension RawRepresentable where Self: Decodable, Self: Unknownable {
+    
+    public init(from decoder: Decoder) throws where RawValue == Int {
+        let rawValue = try RawValue.init(from: decoder)
+        self = Self(rawValue: rawValue) ?? Self.unknown
+    }
+    
+    public init(from decoder: Decoder) throws where RawValue == String {
+        let rawValue = try RawValue.init(from: decoder)
+        self = Self(rawValue: rawValue) ?? Self.unknown
     }
 }
 
@@ -590,11 +607,10 @@ fileprivate extension _CustomJSONValueDecoderImpl {
         return try type.init(from: self)
     }
     
-    
     @inline(__always) private func decodeValue<T: Decodable>(_ type: T.Type) throws -> T? {
         // In blank value, try to use custom initial value provider.
-        if case .blank = value, let type = type as? JSONDecoderExByNilLiteral.Type {
-            return type.init() as? T
+        if case .blank = value, let value = decodeUnknownValue(type) {
+            return value
         }
         // Decode the built-in type.
         switch type {
@@ -609,6 +625,19 @@ fileprivate extension _CustomJSONValueDecoderImpl {
             
         case is Decimal.Type:
             return try decodeDecimalValue() as? T
+            
+        default:
+            return nil
+        }
+    }
+    
+    @inline(__always) private func decodeUnknownValue<T: Decodable>(_ type: T.Type) -> T? {
+        switch type {
+        case let type as Unknownable.Type:
+            return type.unknown as? T
+            
+        case let type as ExpressibleByNilLiteral.Type:
+            return type.init(nilLiteral: ()) as? T
             
         default:
             return nil

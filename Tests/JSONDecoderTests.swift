@@ -26,7 +26,10 @@ struct Demo: Decodable {
         var m: CGFloat
         var n: URL?
     }
-    struct B: Decodable, JSONDecoderExByNilLiteral {
+    struct B: Decodable, Unknownable {
+        static var unknown: Self {
+            return .init()
+        }
         var o = "i2"
         var k = 2
     }
@@ -240,7 +243,10 @@ class JSONDecoderTests: XCTestCase {
         struct E<T: Codable>: Codable {
             let w: T
         }
-        struct I: Codable, JSONDecoderExByNilLiteral {
+        struct I: Codable, Unknownable {
+            static var unknown: Self {
+                return .init()
+            }
             var w: Int = 233
         }
         XCTAssertEqual(try def.decode(E<I>.self, from: [:]).w.w, 233)
