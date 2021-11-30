@@ -363,11 +363,7 @@ fileprivate struct _CustomJSONValueDecoderImpl: Decoder {
         self.userInfo = decoder.userInfo
         self.codingPath = []
         self.options = decoder.options
-        var value = _CustomJSONValue(value)
-        if case .null = value, case .automatically = options.nonOptionalDecodingStrategy {
-            value = .blank
-        }
-        self.value = value
+        self.value = _CustomJSONValue(value)
     }
     init(userInfo: [CodingUserInfoKey: Any], from value: _CustomJSONValue, codingPath: [CodingKey], options: JSONDecoderEx.Options) {
         self.userInfo = userInfo
@@ -438,6 +434,10 @@ fileprivate extension _CustomJSONValueDecoderImpl {
             // An blank value, blank values can convert to any value.
             return value
             
+        case .null where options.nonOptionalDecodingStrategy == .automatically:
+            // An null value, but user wants convert to blank value.
+            return .blank
+
         default:
             return nil
         }
@@ -453,6 +453,10 @@ fileprivate extension _CustomJSONValueDecoderImpl {
         case .array, .blank:
             // An array or blank value, blank values can convert to any value.
             return value
+            
+        case .null where options.nonOptionalDecodingStrategy == .automatically:
+            // An null value, but user wants convert to blank value.
+            return .blank
             
         default:
             return nil

@@ -268,6 +268,29 @@ class JSONDecoderTests: XCTestCase {
         XCTAssertEqual(try def.decode(Double.self, from: "nan").description, "nan")
     }
     
+    func testNull() {
+        struct R: Codable {
+            let subjects: [S]
+            struct S: Codable {
+            }
+        }
+        XCTAssertEqual(try def.decode(R.self, from: "{\"subjects\":null}".data(using: .utf8)!).subjects.count, 0)
+        XCTAssertEqual(try def.decode(R.self, from: "{\"subjects\":[null]}".data(using: .utf8)!).subjects.count, 1)
+        XCTAssertEqual(try def.decode(R.self, from: null).subjects.count, 0)
+        XCTAssertEqual(try def.decode([R].self, from: null).count, 0)
+    }
+    func testNullToOptional() {
+        struct R: Codable {
+            let subjects: [S]?
+            struct S: Codable {
+            }
+        }
+        XCTAssertNil(try def.decode(R.self, from: "{\"subjects\":null}".data(using: .utf8)!).subjects)
+        XCTAssertNotNil(try def.decode(R.self, from: "{\"subjects\":[null]}".data(using: .utf8)!).subjects)
+        XCTAssertNil(try def.decode(R.self, from: null).subjects)
+        XCTAssertNil(try def.decode([R]?.self, from: null))
+    }
+    
     func testDemo() {
         let j = """
                 {
