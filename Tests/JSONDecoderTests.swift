@@ -244,28 +244,41 @@ class JSONDecoderTests: XCTestCase {
             let w: T
         }
         struct I: Codable, Unknownable {
-            static var unknown: Self {
-                return .init()
-            }
+            static let unknown = I()
             var w: Int = 233
         }
         XCTAssertEqual(try def.decode(E<I>.self, from: [:]).w.w, 233)
     }
     
-    func testCustomNumber() {
-        let def = JSONDecoderEx()
-        def.nonConformingNumberDecodingStrategy = .custom {
-            let value = try String(from: $0)
-            if value == "null" {
-                return NSNumber(value: 233)
+    func testSuperDecoder() {
+        struct K: Codable {
+            var d: [String: Int]
+            init(from decoder: Decoder) throws {
+                let lc = try decoder.container(keyedBy: JSONDecoderEx.JSONKey.self)
+                let a = try Int(from: try lc.superDecoder(forKey: "a"))
+                let b = try Int(from: try lc.superDecoder(forKey: "b"))
+                let c = try Int(from: try lc.superDecoder(forKey: "c"))
+                self.d = ["a":a,"b":b,"c":c]
             }
-            throw DecodingError.dataCorrupted(.init(codingPath: $0.codingPath, debugDescription: ""))
         }
-        XCTAssertEqual(try def.decode(Int.self, from: "null"), 233)
-        def.nonConformingNumberDecodingStrategy = .convertFromString(positiveInfinity: "inf", negativeInfinity: "-inf", nan: "nan")
-        XCTAssertEqual(try def.decode(Double.self, from: "inf"), .infinity)
-        XCTAssertEqual(try def.decode(Double.self, from: "-inf"), -.infinity)
-        XCTAssertEqual(try def.decode(Double.self, from: "nan").description, "nan")
+        struct C: Codable {
+            var d: [Int]
+            init(from decoder: Decoder) throws {
+                var lc = try decoder.unkeyedContainer()
+                let p1 = try Int(from: try lc.superDecoder())
+                let p2 = try Int(from: try lc.superDecoder())
+                let p3 = try Int(from: try lc.superDecoder())
+                self.d = [p1,p2,p3]
+            }
+        }
+        struct S<T: Codable>: Codable {
+            let t: T
+        }
+        XCTAssertEqual(try def.decode(C.self, from: "[1,2,3]".data(using: .utf8)!).d, [1,2,3])
+        XCTAssertEqual(try def.decode(S<C>.self, from: "{\"t\":[1,2,3]}".data(using: .utf8)!).t.d, [1,2,3])
+        
+        XCTAssertEqual(try def.decode(K.self, from: "{\"a\":1,\"b\":2,\"c\":3}".data(using: .utf8)!).d, ["a":1,"b":2,"c":3])
+        XCTAssertEqual(try def.decode(S<K>.self, from: "{\"t\":{\"a\":1,\"b\":2,\"c\":3},\"q\":9}".data(using: .utf8)!).t.d, ["a":1,"b":2,"c":3])
     }
     
     func testNull() {
@@ -289,6 +302,205 @@ class JSONDecoderTests: XCTestCase {
         XCTAssertNotNil(try def.decode(R.self, from: "{\"subjects\":[null]}".data(using: .utf8)!).subjects)
         XCTAssertNil(try def.decode(R.self, from: null).subjects)
         XCTAssertNil(try def.decode([R]?.self, from: null))
+    }
+    func testNullToUnknown() {
+        struct R: Codable, Unknownable {
+            let i: Int
+            static let unknown = R(i: 999)
+        }
+        struct S: Codable {
+            let r: R
+        }
+        XCTAssertEqual(try def.decode(R.self, from: null).i, 999)
+        XCTAssertEqual(try def.decode([R].self, from: [null])[0].i, 999)
+        XCTAssertEqual(try def.decode(S.self, from: null).r.i, 999)
+        XCTAssertEqual(try def.decode(S.self, from: [:]).r.i, 999)
+        XCTAssertEqual(try def.decode(S.self, from: ["r":null]).r.i, 999)
+        XCTAssertEqual(try def.decode(S.self, from: ["r":[:]]).r.i, 0)
+    }
+    
+    func testKeyDecodingStrategy() {
+        struct R: Decodable {
+            let k: String
+            init(from decoder: Decoder) throws {
+                let c = try decoder.container(keyedBy: JSONDecoderEx.JSONKey.self)
+                k = c.allKeys.first?.stringValue ?? ""
+            }
+        }
+        let def = JSONDecoderEx()
+        XCTAssertEqual(try def.decode(R.self, from: ["someNumberValue":0]).k, "someNumberValue")
+        XCTAssertEqual(try def.decode(R.self, from: ["some_number_value":0]).k, "some_number_value")
+        def.keyDecodingStrategy = .convertFromSnakeCase
+        XCTAssertEqual(try def.decode(R.self, from: ["someNumberValue":0]).k, "someNumberValue")
+        XCTAssertEqual(try def.decode(R.self, from: ["some_number_value":0]).k, "someNumberValue")
+        let fromSnakeCaseTests = [
+            ("", ""), // don't die on empty string
+            ("a", "a"), // single character
+            ("ALLCAPS", "ALLCAPS"), // If no underscores, we leave the word as-is
+            ("ALL_CAPS", "allCaps"), // Conversion from screaming snake case
+            ("single", "single"), // do not capitalize anything with no underscore
+            ("snake_case", "snakeCase"), // capitalize a character
+            ("one_two_three", "oneTwoThree"), // more than one word
+            ("one_2_three", "one2Three"), // numerics
+            ("one2_three", "one2Three"), // numerics, part 2
+            ("snake_Ćase", "snakeĆase"), // do not further modify a capitalized diacritic
+            ("snake_ćase", "snakeĆase"), // capitalize a diacritic
+            ("alreadyCamelCase", "alreadyCamelCase"), // do not modify already camel case
+            ("__this_and_that", "__thisAndThat"),
+            ("_this_and_that", "_thisAndThat"),
+            ("this__and__that", "thisAndThat"),
+            ("this_and_that__", "thisAndThat__"),
+            ("this_aNd_that", "thisAndThat"),
+            ("_one_two_three", "_oneTwoThree"),
+            ("one_two_three_", "oneTwoThree_"),
+            ("__one_two_three", "__oneTwoThree"),
+            ("one_two_three__", "oneTwoThree__"),
+            ("_one_two_three_", "_oneTwoThree_"),
+            ("__one_two_three", "__oneTwoThree"),
+            ("__one_two_three__", "__oneTwoThree__"),
+            ("_test", "_test"),
+            ("_test_", "_test_"),
+            ("__test", "__test"),
+            ("test__", "test__"),
+            ("_", "_"),
+            ("__", "__"),
+            ("___", "___"),
+            ("m͉̟̹y̦̳G͍͚͎̳r̤͉̤͕ͅea̲͕t͇̥̼͖U͇̝̠R͙̻̥͓̣L̥̖͎͓̪̫ͅR̩͖̩eq͈͓u̞e̱s̙t̤̺ͅ", "m͉̟̹y̦̳G͍͚͎̳r̤͉̤͕ͅea̲͕t͇̥̼͖U͇̝̠R͙̻̥͓̣L̥̖͎͓̪̫ͅR̩͖̩eq͈͓u̞e̱s̙t̤̺ͅ"), // because Itai wanted to test this
+            ("🐧_🐟", "🐧🐟") // fishy emoji example?
+        ]
+        for (lhs, rhs) in fromSnakeCaseTests {
+            XCTAssertEqual(try def.decode(R.self, from: [lhs:0]).k, rhs)
+        }
+        def.keyDecodingStrategy = .custom {
+            if $0.last?.stringValue == "hello" {
+                return JSONDecoderEx.JSONKey(stringValue: "world")
+            }
+            return $0.last!
+        }
+        XCTAssertEqual(try def.decode(R.self, from: ["x":0]).k, "x")
+        XCTAssertEqual(try def.decode(R.self, from: ["hello":0]).k, "world")
+    }
+
+    func testDateDecodingStrategy() {
+        let def = JSONDecoderEx()
+        def.dateDecodingStrategy = .deferredToDate
+        XCTAssertEqual(try def.decode(Date.self, from: 1000), Date(timeIntervalSinceReferenceDate: 1000))
+        XCTAssertEqual(try def.decode(Date.self, from: "1000"), Date(timeIntervalSinceReferenceDate: 1000))
+        XCTAssertThrowsError(try def.decode(Date.self, from: "1970-01-01T00:00:01+00:00"))
+        def.dateDecodingStrategy = .secondsSince1970
+        XCTAssertEqual(try def.decode(Date.self, from: 1000), Date(timeIntervalSince1970: 1000))
+        def.dateDecodingStrategy = .millisecondsSince1970
+        XCTAssertEqual(try def.decode(Date.self, from: 1000), Date(timeIntervalSince1970: 1))
+        if #available(iOS 10.0, *) {
+            def.dateDecodingStrategy = .iso8601
+            XCTAssertThrowsError(try def.decode(Date.self, from: 1000))
+            XCTAssertThrowsError(try def.decode(Date.self, from: "1000"))
+            XCTAssertEqual(try def.decode(Date.self, from: "1970-01-01T00:00:01+00:00"), Date(timeIntervalSince1970: 1))
+        }
+        let df = DateFormatter()
+        df.dateFormat = "yyyy-MM-dd hh:mm:ss"
+        df.timeZone = TimeZone(secondsFromGMT: 0)
+        def.dateDecodingStrategy = .formatted(df)
+        XCTAssertThrowsError(try def.decode(Date.self, from: 1000))
+        XCTAssertThrowsError(try def.decode(Date.self, from: "1000"))
+        XCTAssertEqual(try def.decode(Date.self, from: "1970-01-01 00:00:01"), Date(timeIntervalSince1970: 1))
+        def.dateDecodingStrategy = .custom { coder in
+            let value = try coder.singleValueContainer()
+            return try Date(timeIntervalSince1970: value.decode(Double.self))
+        }
+        XCTAssertEqual(try def.decode(Date.self, from: 1000), Date(timeIntervalSince1970: 1000))
+        XCTAssertEqual(try def.decode(Date.self, from: "1000"), Date(timeIntervalSince1970: 1000))
+    }
+    
+    func testDataDecodingStrategy() {
+        let v = "IzM=" // 23 33
+        let def = JSONDecoderEx()
+        def.dataDecodingStrategy = .deferredToData
+        XCTAssertThrowsError(try def.decode(Data.self, from: "1000"))
+        XCTAssertThrowsError(try def.decode(Data.self, from: 0x2333))
+        XCTAssertEqual(try def.decode(Data.self, from: [0x23,0x33]).base64EncodedString(), v)
+        def.dataDecodingStrategy = .base64
+        XCTAssertEqual(try def.decode(Data.self, from: v).base64EncodedString(), v)
+        XCTAssertThrowsError(try def.decode(Data.self, from: "{0}"))
+        def.dataDecodingStrategy = .custom {
+            let value = try $0.singleValueContainer()
+            if try value.decode(Int.self) == 9 {
+                return Data([0x23, 0x33])
+            }
+            return Data()
+        }
+        XCTAssertThrowsError(try def.decode(Data.self, from: "{0}"))
+        XCTAssertEqual(try def.decode(Data.self, from: 9).base64EncodedString(), v)
+        XCTAssertEqual(try def.decode(Data.self, from: 10).base64EncodedString(), "")
+    }
+    
+    func testNonConformingNumberDecodingStrategy() {
+        let def = JSONDecoderEx()
+        XCTAssertThrowsError(try def.decode(Int.self, from: "0x1234"))
+        def.nonConformingNumberDecodingStrategy = .custom {
+            let value = try String(from: $0)
+            if value == "null" {
+                return NSNumber(value: 233)
+            }
+            throw DecodingError.dataCorrupted(.init(codingPath: $0.codingPath, debugDescription: ""))
+        }
+        XCTAssertEqual(try def.decode(Int.self, from: "null"), 233)
+        XCTAssertThrowsError(try def.decode(Int.self, from: "0x1234"))
+        def.nonConformingNumberDecodingStrategy = .convertFromString(positiveInfinity: "inf", negativeInfinity: "-inf", nan: "nan")
+        XCTAssertEqual(try def.decode(Double.self, from: "inf"), .infinity)
+        XCTAssertEqual(try def.decode(Double.self, from: "-inf"), -.infinity)
+        XCTAssertEqual(try def.decode(Double.self, from: "nan").description, "nan")
+        XCTAssertEqual(try def.decode(Double.self, from: "123.456"), 123.456)
+        XCTAssertThrowsError(try def.decode(Int.self, from: "0x1234"))
+    }
+    
+    func testUnkeyedContainer() {
+        struct R: Decodable {
+            var s: [String]
+            init(from decoder: Decoder) throws {
+                var c = try decoder.unkeyedContainer()
+                if try c.decodeNil() || c.isAtEnd {
+                    throw DecodingError.dataCorrupted(.init(codingPath: c.codingPath, debugDescription: "md"))
+                }
+                self.s = [
+                    try c.decode(Int.self).description,
+                    try c.decode(Int8.self).description,
+                    try c.decode(Int16.self).description,
+                    try c.decode(Int32.self).description,
+                    try c.decode(Int64.self).description,
+                    try c.decode(UInt.self).description,
+                    try c.decode(UInt8.self).description,
+                    try c.decode(UInt16.self).description,
+                    try c.decode(UInt32.self).description,
+                    try c.decode(UInt64.self).description,
+                    try c.decode(Float.self).description,
+                    try c.decode(Double.self).description,
+                    try c.decode(Bool.self).description,
+                    try c.decode(String.self)
+                ]
+            }
+        }
+        let av = NSNumber(value: Int64.max)
+        let iv = NSNumber(value: Int64.min)
+        
+        XCTAssertEqual(try def.decode(R.self, from: [av,av,av,av,av,av,av,av,av,av,av,av,av,av]).s, ["9223372036854775807","-1","-1","-1","9223372036854775807", "9223372036854775807","255","65535","4294967295","9223372036854775807","9.223372e+18","9.223372036854776e+18","true","9223372036854775807"])
+        XCTAssertEqual(try def.decode(R.self, from: [iv,iv,iv,iv,iv,iv,iv,iv,iv,iv,iv,iv,iv,iv]).s, ["-9223372036854775808","0","0","0","-9223372036854775808", "9223372036854775808","0","0","0","9223372036854775808","-9.223372e+18","-9.223372036854776e+18","true","-9223372036854775808"])
+    }
+    
+    func testJSONOptoins() {
+        struct R: Decodable {
+            let z: Int
+        }
+        let def = JSONDecoderEx()
+        XCTAssertEqual(try def.decode(Int.self, from: "1".data(using: .utf8)!), 1)
+        guard #available(macOS 12.0, iOS 15.0, tvOS 15.0, watchOS 8.0, *) else {
+            return
+        }
+        def.allowsJSON5 = true
+        XCTAssertEqual(try def.decode(R.self, from: "{z:1}".data(using: .utf8)!).z, 1)
+        XCTAssertEqual(try def.decode(R.self, from: "{\"z\":1}".data(using: .utf8)!).z, 1)
+        def.assumesTopLevelDictionary = true
+        XCTAssertThrowsError(try def.decode(Int.self, from: "1".data(using: .utf8)!))
     }
     
     func testDemo() {

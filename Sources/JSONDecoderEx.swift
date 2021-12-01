@@ -107,7 +107,7 @@ open class JSONDecoderEx {
             self.stringValue = stringValue
         }
         public init(stringLiteral value: String) {
-            self.stringValue = value
+            self.init(stringValue: value)
         }
         /// Creates a new instance from the specified integer.
         public init(intValue: Int) {
@@ -136,10 +136,12 @@ open class JSONDecoderEx {
     open var userInfo: [CodingUserInfoKey: Any] = [:]
     
     /// Set to `true` to allow parsing of JSON5. Defaults to `false`.
-    open var allowsJSON5: Bool = false
+    @available(macOS 12.0, iOS 15.0, tvOS 15.0, watchOS 8.0, *)
+    open lazy var allowsJSON5: Bool = false
     
     /// Set to `true` to assume the data is a top level Dictionary (no surrounding "{ }" required). Defaults to `false`. Compatible with both JSON5 and non-JSON5 mode.
-    open var assumesTopLevelDictionary: Bool = false
+    @available(macOS 12.0, iOS 15.0, tvOS 15.0, watchOS 8.0, *)
+    open lazy var assumesTopLevelDictionary: Bool = false
     
     /// Options set on the top-level encoder to pass down the decoding hierarchy.
     fileprivate struct Options {
@@ -171,6 +173,7 @@ open class JSONDecoderEx {
             }
             if assumesTopLevelDictionary {
                 // NSJSONReadingTopLevelDictionaryAssumed API_AVAILABLE(macos(12.0), ios(15.0), watchos(8.0), tvos(15.0)) = (1UL << 4),
+                options.remove(.fragmentsAllowed)
                 options.insert(.init(rawValue: 1 << 4))
             }
         }
@@ -544,21 +547,21 @@ fileprivate extension _CustomJSONValueDecoderImpl {
     /// REF: https://forums.swift.org/t/jsonencoder-key-strategies/6958/12
     @inline(__always) func keyFromSnakeCase(_ stringKey: String) -> String {
         // Find the first non-underscore character
-        guard let firstNonUnderscore = stringKey.firstIndex(of: "_") else {
+        guard let firstNonUnderscore = stringKey.firstIndex(where: { $0 != "_" }) else {
             // Reached the end without finding an _
             return stringKey
         }
-        
+
         // Find the last non-underscore character
         var lastNonUnderscore = stringKey.index(before: stringKey.endIndex)
         while lastNonUnderscore > firstNonUnderscore && stringKey[lastNonUnderscore] == "_" {
             stringKey.formIndex(before: &lastNonUnderscore)
         }
-        
+
         let keyRange = firstNonUnderscore ... lastNonUnderscore
         let leadingUnderscoreRange = stringKey.startIndex ..< firstNonUnderscore
         let trailingUnderscoreRange = stringKey.index(after: lastNonUnderscore) ..< stringKey.endIndex
-        
+
         let components = stringKey[keyRange].split(separator: "_")
         let joinedString: String
         if components.count == 1 {
@@ -567,7 +570,7 @@ fileprivate extension _CustomJSONValueDecoderImpl {
         } else {
             joinedString = ([components[0].lowercased()] + components[1...].map { $0.capitalized }).joined()
         }
-        
+
         // Do a cheap isEmpty check before creating and appending potentially empty strings
         let result: String
         if (leadingUnderscoreRange.isEmpty && trailingUnderscoreRange.isEmpty) {
@@ -612,8 +615,8 @@ fileprivate extension _CustomJSONValueDecoderImpl {
     }
     
     @inline(__always) private func decodeValue<T: Decodable>(_ type: T.Type) throws -> T? {
-        // In blank value, try to use custom initial value provider.
-        if case .blank = value, let value = decodeUnknownValue(type) {
+        // When value is a null value, preferred to using custom constructor provider.
+        if value.isNull, let value = decodeUnknownValue(type) {
             return value
         }
         // Decode the built-in type.
