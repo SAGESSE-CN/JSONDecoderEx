@@ -319,6 +319,34 @@ class JSONDecoderTests: XCTestCase {
         XCTAssertEqual(try def.decode(S.self, from: ["r":[:]]).r.i, 0)
     }
     
+    func testKeyPath() {
+        struct R: Codable {
+            let name: String
+            let name2: String
+            init(from decoder: Decoder) throws {
+                let container = try decoder.container(keyedBy: JSONDecoderEx.JSONKey.self)
+                let p = try container.nestedContainer(keyedBy: JSONDecoderEx.JSONKey.self, forKey: "p")
+                name = try p.decode(String.self, forKey: "name") // p.name
+                let pp = try p.nestedContainer(keyedBy: JSONDecoderEx.JSONKey.self, forKey: "pp")
+                name2 = try pp.decode(String.self, forKey: "name") // p.pp.name
+            }
+        }
+        XCTAssertEqual(try def.decode(R.self, from: "{\"p\":{\"name\":\"swift\"}}".data(using: .utf8)!).name, "swift")
+        XCTAssertEqual(try def.decode(R.self, from: "{\"p\":{\"name\":\"swift\",\"pp\":{\"name\":5.2}}}".data(using: .utf8)!).name2, "5.2")
+        XCTAssertEqual(try def.decode(R.self, from: "{}".data(using: .utf8)!).name, "")
+        XCTAssertEqual(try def.decode(R.self, from: "{\"p\":null}".data(using: .utf8)!).name, "")
+        XCTAssertThrowsError(try def.decode(R.self, from:  "{\"p\":[]}".data(using: .utf8)!))
+        XCTAssertEqual(try def.decode(R.self, from: "{\"p\":{}}".data(using: .utf8)!).name, "")
+        XCTAssertThrowsError(try def.decode(R.self, from: "{\"p\":\"123\"}".data(using: .utf8)!))
+    }
+    
+    func testDic() {
+        struct R: Codable {
+            let name: String
+        }
+        XCTAssertEqual(try def.decode(R.self, from: "{\"p\":\"123\"}".data(using: .utf8)!).name, "")
+    }
+
     func testKeyDecodingStrategy() {
         struct R: Decodable {
             let k: String
@@ -391,7 +419,7 @@ class JSONDecoderTests: XCTestCase {
         XCTAssertEqual(try def.decode(Date.self, from: 1000), Date(timeIntervalSince1970: 1000))
         def.dateDecodingStrategy = .millisecondsSince1970
         XCTAssertEqual(try def.decode(Date.self, from: 1000), Date(timeIntervalSince1970: 1))
-        if #available(iOS 10.0, *) {
+        if #available(macOS 10.12, iOS 10.0, watchOS 8.0, *) {
             def.dateDecodingStrategy = .iso8601
             XCTAssertThrowsError(try def.decode(Date.self, from: 1000))
             XCTAssertThrowsError(try def.decode(Date.self, from: "1000"))
@@ -570,6 +598,5 @@ class JSONDecoderTests: XCTestCase {
             //print(error)
         }
     }
-    
 }
  
