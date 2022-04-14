@@ -73,6 +73,20 @@ struct Demo: Decodable {
     //var z5: SIMD<Int>
 }
 
+@propertyWrapper struct CustomModelDecoder<T: NSNumber> : Decodable {
+    
+    let wrappedValue: T
+    init(wrappedValue: T) {
+        self.wrappedValue = wrappedValue
+    }
+    
+    init(from decoder: Decoder) throws {
+        let value = try JSONDecoderEx.JSONValue(from: decoder)
+        let n = value["a"][0].rawValue as? Int ?? 0
+        wrappedValue = T.init(value: n)
+    }
+}
+
 class JSONDecoderTests: XCTestCase {
     
     let def = JSONDecoderEx()
@@ -513,6 +527,15 @@ class JSONDecoderTests: XCTestCase {
         
         XCTAssertEqual(try def.decode(R.self, from: [av,av,av,av,av,av,av,av,av,av,av,av,av,av]).s, ["9223372036854775807","-1","-1","-1","9223372036854775807", "9223372036854775807","255","65535","4294967295","9223372036854775807","9.223372e+18","9.223372036854776e+18","true","9223372036854775807"])
         XCTAssertEqual(try def.decode(R.self, from: [iv,iv,iv,iv,iv,iv,iv,iv,iv,iv,iv,iv,iv,iv]).s, ["-9223372036854775808","0","0","0","-9223372036854775808", "9223372036854775808","0","0","0","9223372036854775808","-9.223372e+18","-9.223372036854776e+18","true","-9223372036854775808"])
+    }
+    
+    func testDecoderToRawValue() {
+        struct R: Decodable {
+            @CustomModelDecoder
+            var r: NSDecimalNumber
+        }
+        XCTAssertEqual(try def.decode(R.self, from: ["r":["a":[33]]]).r, NSDecimalNumber(value: 33))
+        XCTAssertEqual(try def.decode(R.self, from: [:]).r, NSDecimalNumber(value: 0))
     }
     
     func testJSONOptoins() {

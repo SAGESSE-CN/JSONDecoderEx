@@ -93,7 +93,7 @@ open class JSONDecoderEx {
         case custom((_ codingPath: [CodingKey]) -> CodingKey)
     }
     
-    // Generate a custom key for reading the decoder.
+    /// Generate a custom key for reading the decoder.
     public struct JSONKey: CodingKey, ExpressibleByStringLiteral {
         
         /// The value to use in an integer-indexed collection (e.g. an int-keyed
@@ -113,6 +113,37 @@ open class JSONDecoderEx {
         public init(intValue: Int) {
             self.stringValue = "Index \(intValue)"
             self.intValue = intValue
+        }
+    }
+    
+    /// Generate a custom value for reading the decoder.
+    public struct JSONValue: Decodable {
+        
+        private let value: _CustomJSONValue
+        private init(value: _CustomJSONValue) {
+            self.value = value
+        }
+        
+        public init(from decoder: Decoder) throws {
+            guard let impl = decoder as? _CustomJSONValueDecoderImpl else {
+                throw DecodingError.typeMismatch(JSONValue.self, .init(codingPath: decoder.codingPath, debugDescription: "\(JSONValue.self) only support of \(JSONDecoderEx.self)", underlyingError: nil))
+            }
+            self.value = impl.value
+        }
+        
+        /// Retrieves the value of array safely, returning a blank value if are not an array.
+        public subscript(_ key: Int) -> JSONValue {
+            return JSONValue(value: value.value(forKey: key) ?? _CustomJSONValue.blank)
+        }
+        
+        /// Retrieves the value of dictionary safely, returning a blank value if are not an dictionary.
+        public subscript(_ key: String) -> JSONValue {
+            return JSONValue(value: value.value(forKey: key) ?? _CustomJSONValue.blank)
+        }
+        
+        /// Gets raw JSON data from decoder.
+        public var rawValue: Any? {
+            return value.rawValue
         }
     }
     
@@ -273,6 +304,17 @@ fileprivate enum _CustomJSONValue {
         case .string: return "string"
         case .null: return "null"
         case .blank: return "blank"
+        }
+    }
+    
+    var rawValue: Any? {
+        switch self {
+        case .dictionary(let value): return value
+        case .array(let value): return value
+        case .number(let value): return value
+        case .string(let value): return value
+        case .null: return NSNull()
+        case .blank: return nil
         }
     }
     
