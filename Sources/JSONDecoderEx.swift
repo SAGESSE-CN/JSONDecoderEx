@@ -131,12 +131,12 @@ open class JSONDecoderEx {
             self.value = impl.value
         }
         
-        /// Retrieves the value of array safely, returning a blank value if are not an array.
+        /// Retrieves the value of array safely with a given key, return a blank value if are not an array.
         public subscript(_ key: Int) -> JSONValue {
             return JSONValue(value: value.value(forKey: key) ?? _CustomJSONValue.blank)
         }
         
-        /// Retrieves the value of dictionary safely, returning a blank value if are not an dictionary.
+        /// Retrieves the value of dictionary safely with a given key, return a blank value if are not an dictionary.
         public subscript(_ key: String) -> JSONValue {
             return JSONValue(value: value.value(forKey: key) ?? _CustomJSONValue.blank)
         }

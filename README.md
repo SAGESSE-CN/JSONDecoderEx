@@ -47,3 +47,43 @@ let value = try JSONDecoderEx().decode(User.self, from: json.data(using: .utf8)!
 print(value) 
 // User(uid: "1", nickname: Optional("coder"), role: "", gender: User.Gender.unknown)
 ```
+
+```swift
+/// some case decoding required a existing decoder
+@propertyWrapper struct UsingCustomCoder<T: NSObject> : Codable {
+    
+    let wrappedValue: T
+    init(wrappedValue: T) {
+        self.wrappedValue = wrappedValue
+    }
+    
+    init(from decoder: Decoder) throws {
+        let value = try JSONDecoderEx.JSONValue(from: decoder)
+        // direct key-value access
+        let mode = value["mode"].rawValue as? String
+        // bridge to third-party library decoding model
+        if (mode == "yymodel") {
+            self.wrappedValue = T.yy_model(value.rawValue as? [String: Any])
+        } else {
+            ...
+        }
+    }
+    
+    func encode(to encoder: Encoder) throws {
+        ...
+    }
+}
+
+struct Live {
+    ... 
+    @UsingCustomCoder var other: OCModel
+}
+
+let json = """
+         {"other":{"mode":"yymodel","sec":{"keys":["x"]}}}
+         """
+         
+let value = try JSONDecoderEx().decode(Live.self, from: json.data(using: .utf8)!)
+print(value.other) 
+// <OCModel>{keys: ["x"]}
+```
