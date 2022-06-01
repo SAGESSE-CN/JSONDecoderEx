@@ -422,6 +422,27 @@ class JSONDecoderTests: XCTestCase {
         XCTAssertEqual(try def.decode(R.self, from: ["x":0]).k, "x")
         XCTAssertEqual(try def.decode(R.self, from: ["hello":0]).k, "world")
     }
+    
+    func testKeyCustomizable() {
+        struct K : Codable, DecodingCustomizable {
+            
+            let userId: String
+            let userName: String
+            
+            static func customizable(_ container: JSONDecoderEx.JSONValue, forKey key: CodingKey) throws -> JSONDecoderEx.JSONValue? {
+                guard key.stringValue == "userId" else {
+                    return nil
+                }
+                // forwarding userId to id if needed
+                let value = container[key.stringValue]
+                if value.rawValue == nil {
+                    return container["id"]
+                }
+                return value
+            }
+        }
+        XCTAssertEqual(try def.decode(K.self, from: ["id":"abc", "name":"hlp"]).userId, "abc")
+    }
 
     func testDateDecodingStrategy() {
         let def = JSONDecoderEx()

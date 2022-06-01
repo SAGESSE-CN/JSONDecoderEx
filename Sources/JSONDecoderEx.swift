@@ -117,11 +117,15 @@ open class JSONDecoderEx {
     }
     
     /// Generate a custom value for reading the decoder.
-    public struct JSONValue: Decodable {
+    public struct JSONValue: Decodable, Equatable {
         
-        private let value: _CustomJSONValue
-        private init(value: _CustomJSONValue) {
+        fileprivate let value: _CustomJSONValue
+        fileprivate init(from value: _CustomJSONValue) {
             self.value = value
+        }
+        
+        public init(_ value: Any) {
+            self.value = .init(value)
         }
         
         public init(from decoder: Decoder) throws {
@@ -131,15 +135,46 @@ open class JSONDecoderEx {
             self.value = impl.value
         }
         
+        /// Get a null JSON value.
+        public static var null = JSONValue(from: .null)
+        
+        /// Gets a blank JSON value.
+        public static var blank = JSONValue(from: .blank)
+        
+        /// A type that can be compared for JSON value equality.
+        public static func == (lhs: JSONDecoderEx.JSONValue, rhs: JSONDecoderEx.JSONValue) -> Bool {
+            switch (lhs.value, rhs.value) {
+            case (.null, .null), (.blank, .blank):
+                return true
+                
+            case (.number, .number), (.string, .string), (.array, .array), (.dictionary, .dictionary):
+                let lhsRawValue = lhs.rawValue as AnyObject
+                let rhsRawValue = rhs.rawValue as AnyObject
+                return lhsRawValue.isEqual(rhsRawValue)
+                
+            default:
+                return false
+            }
+        }
+        
         /// Retrieves the value of array safely with a given key, return a blank value if are not an array.
         public subscript(_ key: Int) -> JSONValue {
-            return JSONValue(value: value.value(forKey: key) ?? _CustomJSONValue.blank)
+            return .init(from: value.value(forKey: key) ?? .blank)
         }
         
         /// Retrieves the value of dictionary safely with a given key, return a blank value if are not an dictionary.
         public subscript(_ key: String) -> JSONValue {
-            return JSONValue(value: value.value(forKey: key) ?? _CustomJSONValue.blank)
+            return .init(from: value.value(forKey: key) ?? .blank)
         }
+                
+        /// Retrieves the value of array or dictionary safely with a given key, return a blank value if are not an array or dictionary.
+        public subscript(_ key: CodingKey) -> JSONValue {
+            if let index = key.intValue {
+                return self[index]
+            }
+            return self[key.stringValue]
+        }
+
         
         /// Gets raw JSON data from decoder.
         public var rawValue: Any? {
@@ -268,6 +303,22 @@ extension RawRepresentable where Self: Decodable, Self: Unknownable {
         let rawValue = try RawValue.init(from: decoder)
         self = Self(rawValue: rawValue) ?? Self.unknown
     }
+}
+
+
+// MARK: -
+
+
+/// If a type conform the DecodingCustomizable protocol, it can be manual decoding value for key.
+public protocol DecodingCustomizable {
+    
+    /// Manual decoding JSON value for key.
+    ///
+    /// - parameter container: The JSON container for type.
+    /// - parameter key: The member coding key for type.
+    /// - returns: A value of the requested coding key, if return a nil, using default rule to decoding value for coding key.
+    /// - throws: An error if any value throws an error during decoding.
+    static func customizable(_ container: JSONDecoderEx.JSONValue, forKey key: CodingKey) throws -> JSONDecoderEx.JSONValue?
 }
 
 
@@ -403,6 +454,8 @@ fileprivate struct _CustomJSONValueDecoderImpl: Decoder {
     
     let value: _CustomJSONValue
     let options: JSONDecoderEx.Options
+    
+    var customizable: DecodingCustomizable.Type?
     
     init(_ decoder: JSONDecoderEx, from value: Any) {
         self.userInfo = decoder.userInfo
@@ -653,7 +706,9 @@ fileprivate extension _CustomJSONValueDecoderImpl {
         if let value = try decodeValue(type) {
             return value
         }
-        return try type.init(from: self)
+        var impl = self
+        impl.customizable = type as? DecodingCustomizable.Type
+        return try type.init(from: impl)
     }
     
     @inline(__always) private func decodeValue<T: Decodable>(_ type: T.Type) throws -> T? {
@@ -935,9 +990,16 @@ fileprivate struct _CustomJSONValueDecoderKeyedContainer<Key: CodingKey>: KeyedD
         try decoder(forKey: key)
     }
     
-    
+    @inline(__always) private func resolvedValue(_ key: CodingKey) throws -> _CustomJSONValue? {
+        // call manual decoding
+        if let resolvedValue = try impl.customizable?.customizable(.init(from: value), forKey: key)?.value {
+            return resolvedValue
+        }
+        return value.value(forKey: key.stringValue)
+    }
+
     @inline(__always) private func value<T>(_ type: T.Type, forKey key: CodingKey) throws -> _CustomJSONValue {
-        guard let rawValue = value.value(forKey: key.stringValue) else {
+        guard let rawValue = try resolvedValue(key) else {
             if case .automatically = impl.options.nonOptionalDecodingStrategy {
                 return .blank
             }
