@@ -94,7 +94,7 @@ open class JSONDecoderEx {
     }
     
     /// Generate a custom key for reading the decoder.
-    public struct JSONKey: CodingKey, ExpressibleByStringLiteral {
+    public struct JSONKey: CodingKey, ExpressibleByStringLiteral, ExpressibleByIntegerLiteral {
         
         /// The value to use in an integer-indexed collection (e.g. an int-keyed
         /// dictionary).
@@ -113,6 +113,9 @@ open class JSONDecoderEx {
         public init(intValue: Int) {
             self.stringValue = "Index \(intValue)"
             self.intValue = intValue
+        }
+        public init(integerLiteral value: Int) {
+            self.init(intValue: value)
         }
     }
     
@@ -318,7 +321,18 @@ public protocol DecodingCustomizable {
     /// - parameter key: The member coding key for type.
     /// - returns: A value of the requested coding key, if return a nil, using default rule to decoding value for coding key.
     /// - throws: An error if any value throws an error during decoding.
-    static func customizable(_ container: JSONDecoderEx.JSONValue, forKey key: CodingKey) throws -> JSONDecoderEx.JSONValue?
+    static func decodingCustomize(_ container: JSONDecoderEx.JSONValue, forKey key: CodingKey) throws -> JSONDecoderEx.JSONValue?
+}
+
+
+/// If a type conform the DecodingValidatable protocol, it will validate value before the decoding value.
+public protocol DecodingValidatable {
+    
+    /// Validate decodeing JSON value.
+    ///
+    /// - parameter container: The JSON value for type.
+    /// - returns: if validate fail return false.
+    static func decodingValidate(_ container: JSONDecoderEx.JSONValue) -> Bool
 }
 
 
@@ -585,7 +599,7 @@ fileprivate extension _CustomJSONValueDecoderImpl {
         case .number(let value):
             // An number value already, maybe needs more fixed width type validation.
             guard compatible(value, to: type) else {
-                throw DecodingError.dataCorrupted(.init(codingPath: codingPath + key, debugDescription: "Parsed JSON number <\(value)> does not fit in \(type)."))
+                throw createDataCorrupted(key, debugDescription: "Parsed JSON number <\(value)> does not fit in \(type).")
             }
             return value
             
@@ -620,9 +634,7 @@ fileprivate extension _CustomJSONValueDecoderImpl {
                 let decoder = _CustomJSONValueDecoderImpl(userInfo: userInfo, from: .string(value), codingPath: codingPath + key, options: options)
                 return try converter(decoder)
             }
-            throw DecodingError.dataCorrupted(.init(
-                codingPath: codingPath + key,
-                debugDescription: "Parsed JSON number <\(value)> does not fit in \(type)."))
+            throw createDataCorrupted(key, debugDescription: "Parsed JSON number <\(value)> does not fit in \(type).")
             
         case .blank, .null:
             // An null or blank value, always return zero.
@@ -683,6 +695,10 @@ fileprivate extension _CustomJSONValueDecoderImpl {
         return result
     }
     
+    
+    @inline(__always) func createDataCorrupted(_ key: CodingKey? = nil, debugDescription: String) -> DecodingError {
+        return .dataCorrupted(.init(codingPath: codingPath + key, debugDescription: debugDescription))
+    }
     
     @inline(__always) func createTypeMismatch<T>(_ type: T.Type, from value: _CustomJSONValue, forKey key: CodingKey? = nil) -> DecodingError {
         let description = "Expected to decode \(type) but found \(value.description) instead."
@@ -769,7 +785,7 @@ fileprivate extension _CustomJSONValueDecoderImpl {
             let container = try singleValueContainer()
             let string = try container.decode(String.self)
             guard let date = _iso8601Formatter.date(from: string) else {
-                throw DecodingError.dataCorrupted(DecodingError.Context(codingPath: codingPath, debugDescription: "Expected date string to be ISO8601-formatted."))
+                throw createDataCorrupted(debugDescription: "Expected date string to be ISO8601-formatted.")
             }
             return date
             
@@ -777,7 +793,7 @@ fileprivate extension _CustomJSONValueDecoderImpl {
             let container = try singleValueContainer()
             let string = try container.decode(String.self)
             guard let date = formatter.date(from: string) else {
-                throw DecodingError.dataCorrupted(DecodingError.Context(codingPath: codingPath, debugDescription: "Date string does not match format expected by formatter."))
+                throw createDataCorrupted(debugDescription: "Date string does not match format expected by formatter.")
             }
             return date
             
@@ -794,7 +810,7 @@ fileprivate extension _CustomJSONValueDecoderImpl {
             let container = try singleValueContainer()
             let string = try container.decode(String.self)
             guard let data = Data(base64Encoded: string) else {
-                throw DecodingError.dataCorrupted(DecodingError.Context(codingPath: codingPath, debugDescription: "Encountered Data is not valid Base64."))
+                throw createDataCorrupted(debugDescription: "Encountered Data is not valid Base64.")
             }
             return data
             
@@ -806,7 +822,7 @@ fileprivate extension _CustomJSONValueDecoderImpl {
         let container = try singleValueContainer()
         let string = try container.decode(String.self)
         guard let url = URL(string: string) else {
-            throw DecodingError.dataCorrupted(DecodingError.Context(codingPath: codingPath, debugDescription: "Invalid URL string."))
+            throw createDataCorrupted(debugDescription: "Invalid URL string.")
         }
         return url
     }
@@ -817,6 +833,35 @@ fileprivate extension _CustomJSONValueDecoderImpl {
         return value.decimalValue
     }
     
+}
+
+
+fileprivate extension _CustomJSONValueDecoderImpl {
+    
+    @inline(__always) func vaildate<T: Decodable>(_ type: T.Type) -> Bool {
+        if value.isNull {
+            return false
+        }
+        if let vaildator = type as? DecodingValidatable.Type {
+            return vaildator.decodingValidate(JSONDecoderEx.JSONValue(from: value))
+        }
+        return vaildateValue(type)
+    }
+    
+    @inline(__always) private func vaildateValue<T: Decodable>(_ type: T.Type) -> Bool {
+        // Decode the built-in type.
+        switch type {
+        case is URL.Type:
+            // URL only supported non-blank strings.
+            if let string = value.rawValue as? String, string.isEmpty {
+                return false
+            }
+            return true
+            
+        default:
+            return true
+        }
+    }
 }
 
 
@@ -924,7 +969,6 @@ fileprivate struct _CustomJSONValueDecoderKeyedContainer<Key: CodingKey>: KeyedD
         value.contains(key.stringValue)
     }
     
-    
     func decodeNil(forKey key: Key) throws -> Bool {
         try value(Never.self, forKey: key).isNull
     }
@@ -976,6 +1020,17 @@ fileprivate struct _CustomJSONValueDecoderKeyedContainer<Key: CodingKey>: KeyedD
         try decoder(forKey: key).decode(type)
     }
     
+    func decodeIfPresent<T>(_ type: T.Type, forKey key: Key) throws -> T? where T : Decodable {
+        guard contains(key) else {
+            return nil
+        }
+        let decoder = try decoder(forKey: key)
+        guard decoder.vaildate(type) else {
+            return nil
+        }
+        return try decoder.decode(type)
+    }
+    
     func nestedContainer<NestedKey>(keyedBy type: NestedKey.Type, forKey key: Key) throws -> KeyedDecodingContainer<NestedKey> where NestedKey: CodingKey {
         try decoder(forKey: key).container(keyedBy: type)
     }
@@ -992,7 +1047,7 @@ fileprivate struct _CustomJSONValueDecoderKeyedContainer<Key: CodingKey>: KeyedD
     
     @inline(__always) private func resolvedValue(_ key: CodingKey) throws -> _CustomJSONValue? {
         // call manual decoding
-        if let resolvedValue = try impl.customizable?.customizable(.init(from: value), forKey: key)?.value {
+        if let resolvedValue = try impl.customizable?.decodingCustomize(.init(from: value), forKey: key)?.value {
             return resolvedValue
         }
         return value.value(forKey: key.stringValue)
@@ -1035,7 +1090,7 @@ fileprivate struct _CustomJSONValueDecoderUnkeyedContainer: UnkeyedDecodingConta
     let codingPath: [CodingKey]
     
     var count: Int? { value.count }
-    var isAtEnd: Bool { currentIndex >= (count ?? 0) }
+    var isAtEnd: Bool { currentIndex >= value.count }
     var currentIndex = 0
     
     init(impl: _CustomJSONValueDecoderImpl, from value: _CustomJSONValue, codingPath: [CodingKey]) {
