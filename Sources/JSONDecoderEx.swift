@@ -206,11 +206,17 @@ open class JSONDecoderEx {
     
     /// Set to `true` to allow parsing of JSON5. Defaults to `false`.
     @available(macOS 12.0, iOS 15.0, tvOS 15.0, watchOS 8.0, *)
-    open lazy var allowsJSON5: Bool = false
+    open var allowsJSON5: Bool {
+        get { _allowsJSON5 }
+        set { _allowsJSON5 = newValue }
+    }
     
     /// Set to `true` to assume the data is a top level Dictionary (no surrounding "{ }" required). Defaults to `false`. Compatible with both JSON5 and non-JSON5 mode.
     @available(macOS 12.0, iOS 15.0, tvOS 15.0, watchOS 8.0, *)
-    open lazy var assumesTopLevelDictionary: Bool = false
+    open var assumesTopLevelDictionary: Bool {
+        get { _assumesTopLevelDictionary }
+        set { _assumesTopLevelDictionary = newValue }
+    }
     
     /// Options set on the top-level encoder to pass down the decoding hierarchy.
     fileprivate struct Options {
@@ -284,6 +290,9 @@ open class JSONDecoderEx {
         let decoder = _CustomJSONValueDecoderImpl(self, from: object)
         return try decoder.decode(type)
     }
+    
+    private var _allowsJSON5: Bool = false
+    private var _assumesTopLevelDictionary: Bool = false
 }
 
 

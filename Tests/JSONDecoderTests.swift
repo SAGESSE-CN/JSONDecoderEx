@@ -98,6 +98,52 @@ struct Demo: Decodable {
     }
 }
 
+@propertyWrapper struct EmbeddedJSON<T: Codable> : Codable {
+    
+    let wrappedValue: T
+    init(wrappedValue: T) {
+        self.wrappedValue = wrappedValue
+    }
+    
+    init(from decoder: Decoder) throws {
+        let value = try decoder.singleValueContainer().decode(String.self)
+        guard let jsonData = value.data(using: .utf8) else {
+            throw NSError(domain: "EmbeddedJSONError", code: -1)
+        }
+        let decoder = JSONDecoderEx()
+        wrappedValue = try decoder.decode(T.self, from: jsonData)
+    }
+    
+    func encode(to encoder: Encoder) throws {
+        let enc = JSONEncoder()
+        guard let value = String(data: try enc.encode(wrappedValue), encoding: .utf8) else {
+            throw NSError(domain: "EmbeddedJSONError", code: -1)
+        }
+        var container = encoder.singleValueContainer()
+        try container.encode(value)
+    }
+}
+
+
+
+@propertyWrapper struct DefaultTrue : Decodable {
+    
+    let wrappedValue: Bool
+    init() {
+        self.wrappedValue = true
+    }
+    
+    init(from decoder: Decoder) throws {
+        let value = try JSONDecoderEx.JSONValue(from: decoder)
+        if value == .null || value == .blank {
+            self.wrappedValue = true
+            return
+        }
+        wrappedValue = try decoder.singleValueContainer().decode(Bool.self)
+    }
+
+}
+
 class JSONDecoderTests: XCTestCase {
     
     let def = JSONDecoderEx()
@@ -661,6 +707,15 @@ class JSONDecoderTests: XCTestCase {
         XCTAssertThrowsError(try def.decode(R.self, from: [av,av,av,av,av,av,av,av,av,av,av,av,av,[:]]))
     }
     
+    func testDefaultTrue() {
+        struct R: Decodable {
+            @DefaultTrue
+            var b: Bool
+        }
+        XCTAssertEqual(try def.decode(R.self, from: [:]).b, true)
+        XCTAssertEqual(try def.decode(R.self, from: ["b":false]).b, false)
+    }
+    
     func testDecoderToRawValue() {
         struct R: Decodable {
             @CustomModelDecoder
@@ -684,6 +739,31 @@ class JSONDecoderTests: XCTestCase {
         XCTAssertEqual(try def.decode(R.self, with: "{\"z\":1}").z, 1)
         def.assumesTopLevelDictionary = true
         XCTAssertThrowsError(try def.decode(Int.self, with: "1"))
+    }
+    
+    func testEmbeddedJSON() {
+        struct B: Codable {
+            let link_id: String
+            let buy_count: Int
+        }
+        struct A: Codable {
+
+          let object: String
+          let id: String
+          let email: String
+            
+          @EmbeddedJSON
+          var metadata: B
+        }
+        let j = """
+                {
+                "object":"customer",
+                "id":"4yq6txdpfadhbaqnwp3",
+                "email": "john.doe@example.com",
+                "metadata": "{\\"link_id\\":\\"linked-id\\", \\"buy_count\\": 4}"
+                }
+                """
+        XCTAssertEqual(try def.decode(A.self, with: j).metadata.link_id, "linked-id")
     }
     
     func testDemo() {

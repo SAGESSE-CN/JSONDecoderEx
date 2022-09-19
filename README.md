@@ -27,7 +27,7 @@ struct User: Codable {
 }
 
 let json = """
-         {"uid":"coder","nickname":"coder","role":3}
+         {"uid":"coder","nickname":"coder","role":"3"}
          """
          
 let value = try JSONDecoderEx().decode(User.self, from: json.data(using: .utf8)!)
@@ -40,7 +40,7 @@ print(value)
 extension User.Gender : Unknownable {}
 
 let json = """
-         {"uid":1,"nickname":"coder","gender":3}
+         {"uid":1,"nickname":"coder","gender":"3"}
          """
          
 let value = try JSONDecoderEx().decode(User.self, from: json.data(using: .utf8)!)
