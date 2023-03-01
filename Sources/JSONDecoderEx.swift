@@ -321,6 +321,13 @@ extension RawRepresentable where Self: Decodable, Self: Unknownable {
 // MARK: -
 
 
+/// If a type conform the DecodingKeyMapping protocol, it can be mapping a key to another key.
+public protocol DecodingKeyMapping {
+    
+    /// A table for mapping a key to another key.
+    static var decodingKeyMapper: [String: String] { get }
+}
+
 /// If a type conform the DecodingCustomizable protocol, it can be manual decoding value for key.
 public protocol DecodingCustomizable {
     
@@ -332,7 +339,6 @@ public protocol DecodingCustomizable {
     /// - throws: An error if any value throws an error during decoding.
     static func decodingCustomize(_ container: JSONDecoderEx.JSONValue, forKey key: CodingKey) throws -> JSONDecoderEx.JSONValue?
 }
-
 
 /// If a type conform the DecodingValidatable protocol, it will validate value before the decoding value.
 public protocol DecodingValidatable {
@@ -478,6 +484,7 @@ fileprivate struct _CustomJSONValueDecoderImpl: Decoder {
     let value: _CustomJSONValue
     let options: JSONDecoderEx.Options
     
+    var mapping: DecodingKeyMapping.Type?
     var customizable: DecodingCustomizable.Type?
     
     init(_ decoder: JSONDecoderEx, from value: Any) {
@@ -732,6 +739,7 @@ fileprivate extension _CustomJSONValueDecoderImpl {
             return value
         }
         var impl = self
+        impl.mapping = type as? DecodingKeyMapping.Type
         impl.customizable = type as? DecodingCustomizable.Type
         return try type.init(from: impl)
     }
@@ -1058,6 +1066,14 @@ fileprivate struct _CustomJSONValueDecoderKeyedContainer<Key: CodingKey>: KeyedD
         // call manual decoding
         if let resolvedValue = try impl.customizable?.decodingCustomize(.init(from: value), forKey: key)?.value {
             return resolvedValue
+        }
+        // resolve the key when the value found value.
+        if let mapper = impl.mapping?.decodingKeyMapper, !mapper.isEmpty {
+            for (originKey, targetKey) in mapper {
+                if targetKey == key.stringValue, value.contains(originKey) {
+                    return value.value(forKey: originKey)
+                }
+            }
         }
         return value.value(forKey: key.stringValue)
     }

@@ -557,6 +557,23 @@ class JSONDecoderTests: XCTestCase {
         XCTAssertEqual(try def.decode(E.self, with: "{\"k\":{\"userId\":\"233\"}}").k?.userId, "233")
     }
     
+    func testKeyMapping() {
+        struct K : Codable, DecodingKeyMapping {
+
+            let uid: String
+          
+            static let decodingKeyMapper = [
+                "id": "uid",
+                "userId": "uid",
+            ]
+        }
+        
+        XCTAssertEqual(try def.decode(K.self, from: ["id":"abc", "name":"hlp"]).uid, "abc")
+        XCTAssertEqual(try def.decode(K.self, from: ["userId":"abc", "name":"hlp"]).uid, "abc")
+        XCTAssertEqual(try def.decode(K.self, from: ["uid":"abc", "name":"hlp"]).uid, "abc")
+
+    }
+    
     func testKeyCustomizable() {
         struct K : Codable, DecodingCustomizable {
             

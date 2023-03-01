@@ -39,8 +39,16 @@ print(value)
 ```swift
 extension User.Gender : Unknownable {}
 
+extension User : DecodingKeyMapping {
+
+    static let decodingKeyMapper = [
+        "id": "uid",
+        "userId": "uid",
+    ]
+}
+
 let json = """
-         {"uid":1,"nickname":"coder","gender":"3"}
+         {"id":1,"nickname":"coder","gender":"3"}
          """
          
 let value = try JSONDecoderEx().decode(User.self, from: json.data(using: .utf8)!)
